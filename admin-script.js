@@ -311,26 +311,7 @@ function fillSettingsForm(){
   $('saveSettingsBtn').disabled = !school;
   $('rebuildBtn').disabled = !settingsFor(school);
   updatePreview();
-  showRegisteredCount(school);
 }
-
-// How many students of this school already registered in the portal (a hint for "Total students").
-async function showRegisteredCount(school){
-  const box = $('setRegistered');
-  box.textContent = '';
-  if (!school) return;
-  const seq = nextSeq('registered');
-  const { count } = await sb.from('Clients').select('Username', { count: 'exact', head: true }).ilike('School', school);
-  if (seq !== loadSeq.registered || count === null || count === undefined) return;
-  box.innerHTML = `${count.toLocaleString()} student${count === 1 ? '' : 's'} of this school registered in the portal so far.`
-    + (count ? ` <button type="button" class="btn-link" id="useRegisteredBtn" data-count="${count}">Use ${count.toLocaleString()}</button>` : '');
-}
-$('setRegistered').addEventListener('click', (e) => {
-  const btn = e.target.closest('#useRegisteredBtn');
-  if (!btn) return;
-  $('setTotal').value = btn.dataset.count;
-  updatePreview();
-});
 
 function readSettingsForm(){
   const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
