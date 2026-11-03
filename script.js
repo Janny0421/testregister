@@ -215,38 +215,6 @@ function showSelectedPackageBanner(){
 }
 showSelectedPackageBanner();
 
-async function savePendingPackageSelection(studentProfileId){
-  const pkgName = sessionStorage.getItem('pendingPackageName');
-  const pkgPrice = sessionStorage.getItem('pendingPackagePrice');
-
-  if (pkgName && pkgPrice) {
-    const { error } = await sb.from('package_selections').insert({
-      student_id: studentProfileId,
-      package_name: pkgName,
-      package_price: Number(pkgPrice)
-    });
-
-    if (!error || error.code === '23505') {
-      sessionStorage.removeItem('pendingPackageName');
-      sessionStorage.removeItem('pendingPackagePrice');
-    }
-  }
-
-  const pkgDate = sessionStorage.getItem('pendingPreferredDate');
-  if (pkgDate) {
-    const { error: apptError } = await sb.from('appointments').insert({
-      student_id: studentProfileId,
-      appointment_type: 'photoshoot',
-      scheduled_at: pkgDate + 'T00:00:00',
-      status: 'pending',
-      notes: 'Preferred walk-in date from package selection — awaiting studio confirmation.'
-    });
-    if (!apptError) {
-      sessionStorage.removeItem('pendingPreferredDate');
-    }
-  }
-}
-
 /* -------------------- nav links between login/register/forgot -------------------- */
 document.getElementById('goToRegister').addEventListener('click', (e) => {
   e.preventDefault();
@@ -405,7 +373,8 @@ function startOAuth(state){
 
 function socialErr(error){
   const m = (error && error.message) || '';
-  if (/invalid credentials/i.test(m)) return 'Incorrect password.';
+  // Google-created accounts have no usable password until one is set through Forgot password.
+  if (/invalid[_ ]credentials/i.test(m)) return 'Incorrect password. If you signed up with Google and never set a password, use “Forgot password” on the login page to set one first.';
   if (/already linked/i.test(m)) return 'That account is already connected to a different student account.';
   if (/link expired/i.test(m)) return 'The connection request expired. Please try again.';
   return m || 'Something went wrong. Please try again.';
@@ -432,7 +401,7 @@ function socialAuthErr(error, label){
 async function renderSocialList(){
   const box = document.getElementById('socialList');
   if (!box || !currentUser) return;
-  const { data } = await rpc('list_social_links', { p_token: getSession() });
+  const { data } = await rpc('student_list_social_links', { p_token: getSession() });
   const linked = data || [];
   box.innerHTML = Object.entries(SOCIAL_PROVIDERS).map(([key, label]) => {
     const on = linked.includes(key);
@@ -450,7 +419,7 @@ document.getElementById('socialList').addEventListener('click', async (e) => {
   if (!pw) { alertBox('socialAlert', 'Enter your password first to confirm.', 'error'); return; }
 
   if (btn.dataset.on === 'true') {
-    const { error } = await rpc('unlink_social', { p_token: getSession(), p_password: pw, p_provider: provider });
+    const { error } = await rpc('student_unlink_social', { p_token: getSession(), p_password: pw, p_provider: provider });
     if (error) { if (!error.handled) alertBox('socialAlert', socialErr(error), 'error'); return; }
     document.getElementById('socialPw').value = '';
     alertBox('socialAlert', `${label} disconnected.`, 'success');
@@ -458,7 +427,7 @@ document.getElementById('socialList').addEventListener('click', async (e) => {
     return;
   }
 
-  const { data: token, error } = await rpc('create_link_token', { p_token: getSession(), p_password: pw });
+  const { data: token, error } = await rpc('student_create_link_token', { p_token: getSession(), p_password: pw });
   if (error) { if (!error.handled) alertBox('socialAlert', socialErr(error), 'error'); return; }
   document.getElementById('socialPw').value = '';
   const res = await startOAuth({ mode: 'link', provider, token });
@@ -477,7 +446,8 @@ async function handleOAuthReturn(st){
   }
 
   if (st.mode === 'link') {
-    const { error } = await sb.rpc('link_social', { p_token: st.token, p_provider: st.provider });
+    // Must run while the Google auth session exists; the link token proves which student asked.
+    const { error } = await sb.rpc('student_link_social', { p_link_token: st.token, p_provider: st.provider });
     await sb.auth.signOut();
     const profile = await enterPortal();
     if (profile) alertBox('socialAlert', error ? socialErr(error) : `${label} connected.`, error ? 'error' : 'success');
@@ -487,7 +457,7 @@ async function handleOAuthReturn(st){
   // social_register first (creates the Clients row if needed), then mint the portal
   // session while the Google auth session is still fresh, then drop the auth session.
   const { data: reg, error: regError } = await sb.rpc('social_register', { p_provider: st.provider });
-  const info = firstRow(reg);
+  const info = firstRow(reg); // test returns a one-row array, live returns {username, is_new}
   let sessionRes = null;
   if (!regError && info && info.username) {
     sessionRes = await sb.rpc('student_session_from_oauth');
